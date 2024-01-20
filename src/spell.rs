@@ -19,7 +19,7 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
     // Read the initial version line.
     let mut output = String::new();
     stdout.read_line(&mut output)?;
-    eprintln!("Read line {output}");
+    eprintln!("Read line '{output}'");
 
     // Enable terse mode, so we don't need to read "*" for every ok word.
     stdin.write_all("!\n".as_bytes())?;
@@ -27,8 +27,11 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
     let mut diags = vec![];
     for (line, input) in text.lines().enumerate() {
         let line = line.try_into()?;
+        if input.is_empty() {
+            continue;
+        }
 
-        eprintln!("Writing {input}");
+        eprintln!("Writing '{input}'");
         stdin.write_all(input.as_bytes())?;
         stdin.write_all("\n".as_bytes())?;
         stdin.flush()?;
@@ -36,7 +39,7 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
         loop {
             let mut output = String::new();
             stdout.read_line(&mut output)?;
-            eprintln!("Read line {output}");
+            eprintln!("Read line {line}: '{output}'");
 
             // http://aspell.net/man-html/Through-A-Pipe.html#Through-A-Pipe
             // OK: *
@@ -78,7 +81,7 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
                     ..Default::default()
                 },
                 ["\n"] => {
-                    eprintln!("done");
+                    eprintln!("Done parsing diagnostics for line {line}");
                     break; // done with results for this line
                 }
                 _ => Err(format!("Unexpected line: {output}: {parts:?}"))?,
@@ -103,6 +106,8 @@ mod tests {
                 "The quick brown fox jumped over the lazy dog",
                 "The quick brown fox jumped over the lazy doge",
                 "The kwick brown fox jumped over the lazzy dog",
+                "",
+                "The quick brown fox jumped over the lazy dog",
             ]
             .join("\n")
             .as_str(),
