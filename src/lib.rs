@@ -150,41 +150,6 @@ fn notify_did_change(
     Ok(None)
 }
 
-fn has_proto_files(path: impl AsRef<std::path::Path>) -> Result<bool> {
-    Ok(std::fs::read_dir(path)?
-        .find(|x| match x {
-            Ok(entry) => entry
-                .path()
-                .extension()
-                .map_or(false, |e| e.to_str() == Some("proto")),
-            Err(_) => false,
-        })
-        .is_some())
-}
-
-fn find_dirs(root: std::path::PathBuf) -> Result<Vec<std::path::PathBuf>> {
-    let mut res = vec![];
-    for entry in std::fs::read_dir(&root)? {
-        if let Ok(entry) = entry {
-            if entry.metadata().is_ok_and(|m| m.is_dir()) {
-                let mut dirs = find_dirs(entry.path())?;
-                res.append(&mut dirs);
-            }
-        }
-    }
-    res.push(root);
-    Ok(res)
-}
-
-fn find_import_paths(root: std::path::PathBuf) -> Result<Vec<std::path::PathBuf>> {
-    let dirs = find_dirs(root)?;
-    Ok(dirs
-        .iter()
-        .filter(|&x| has_proto_files(x).unwrap_or(false))
-        .map(|x| x.to_owned())
-        .collect())
-}
-
 pub fn run(connection: Connection) -> Result<()> {
     let server_capabilities = serde_json::to_value(&ServerCapabilities {
         // BUG: technically we are supposed to support UTF-16.
