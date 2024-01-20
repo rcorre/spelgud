@@ -16,8 +16,9 @@ use lsp_types::{
 use pretty_assertions::assert_eq;
 use spelgud::Result;
 use std::error::Error;
+use std::fmt::Debug;
 
-fn base_uri() -> Url {
+fn example_uri() -> Url {
     Url::from_file_path(std::fs::canonicalize("./testdata/example.txt").unwrap()).unwrap()
 }
 
@@ -26,7 +27,6 @@ fn diag(uri: Url, target: &str, message: &str) -> Diagnostic {
         range: locate(uri, target).range,
         message: message.into(),
         severity: Some(DiagnosticSeverity::ERROR),
-        source: Some("spelgud".into()),
         ..Default::default()
     }
 }
@@ -64,7 +64,7 @@ fn position(uri: Url, text: &str, column: u32) -> TextDocumentPositionParams {
 
     let character = line.find(text).unwrap_or(0);
     TextDocumentPositionParams {
-        text_document: TextDocumentIdentifier { uri: base_uri() },
+        text_document: TextDocumentIdentifier { uri: example_uri() },
         position: Position {
             line: lineno.try_into().unwrap(),
             character: column + u32::try_from(character).unwrap(),
@@ -86,32 +86,24 @@ fn goto(uri: Url, text: &str, column: u32) -> GotoDefinitionParams {
     }
 }
 
-// Given "some |search| string", locate "some search string" in the document
-// and return the Location of "search".
+// Return the location of a string in a document.
 fn locate(uri: Url, text: &str) -> Location {
-    let start_off = text.find("|").unwrap();
-    let end_off = text.rfind("|").unwrap() - 1;
-    let text = text.replace("|", "");
     let filetext = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
-    let (start_line, start_col) = filetext
-        .lines()
-        .enumerate()
-        .find_map(|(i, l)| match l.find(text.as_str()) {
-            Some(col) => Some((i, col)),
-            None => None,
-        })
-        .unwrap_or_else(|| panic!("{text} not found in {uri}"));
+    let (prefix, _) = filetext
+        .split_once(&text)
+        .expect(format!("{text} not found in {uri:?}").as_str());
+    let lines = prefix.lines();
+    let line = (lines.clone().count() - 1).try_into().unwrap();
+    let character = lines.last().unwrap().chars().count().try_into().unwrap();
+    let size = u32::try_from(text.chars().count()).unwrap();
 
     Location {
         uri,
         range: Range {
-            start: Position {
-                line: start_line.try_into().unwrap(),
-                character: (start_col + start_off).try_into().unwrap(),
-            },
+            start: Position { line, character },
             end: Position {
-                line: start_line.try_into().unwrap(),
-                character: (start_col + end_off).try_into().unwrap(),
+                line,
+                character: character + size,
             },
         },
     }
@@ -270,39 +262,27 @@ fn test_start_stop() -> spelgud::Result<()> {
 fn test_open() -> spelgud::Result<()> {
     let client = TestClient::new()?;
 
-    assert_eq!(
-        client.open(base_uri())?,
-        PublishDiagnosticsParams {
-            uri: base_uri(),
-            diagnostics: vec![],
-            version: None,
-        }
+    let diags = client.open(example_uri())?;
+    assert_eq!(diags.uri, example_uri());
+    assert_elements_equal(
+        diags.diagnostics,
+        vec![
+            diag(example_uri(), "quik", "quik"),
+            diag(example_uri(), "jumpd", "jumpd"),
+        ],
+        |s| s.message.clone(),
     );
-    Ok(())
-}
-
-#[test]
-fn test_diagnostics_on_open() -> spelgud::Result<()> {
-    let client = TestClient::new()?;
-
-    let diags = client.open(base_uri())?;
-    assert_eq!(diags.uri, base_uri());
-    assert_elements_equal(diags.diagnostics, vec![], |s| s.message.clone());
     Ok(())
 }
 
 #[test]
 fn test_diagnostics_on_save() -> spelgud::Result<()> {
     let tmp = tempfile::tempdir()?;
-    let path = tmp.path().join("example.proto");
+    let path = tmp.path().join("example.txt");
     let uri = Url::from_file_path(&path).unwrap();
     let client = TestClient::new_with_root(&tmp)?;
 
-    let text = r#"
-syntax = "proto3";
-package main;
-message Foo{}
-"#;
+    let text = "This has no errors.";
     std::fs::write(&path, text)?;
 
     let diags = client.open(uri.clone())?;
@@ -316,16 +296,12 @@ message Foo{}
     );
 
     // modify the file, check that we pick up the change
-    let text = r#"
-syntax = "proto3";
-package main;
-message Foo{Flob flob = 1;}
-"#;
+    let text = r#"This has no errors, but now it duz"#;
     std::fs::write(&path, text)?;
 
     let start = lsp_types::Position {
-        line: 3,
-        character: "message Foo{ ".len() as u32,
+        line: 0,
+        character: "This has no errors".len() as u32,
     };
     client.notify::<DidChangeTextDocument>(DidChangeTextDocumentParams {
         text_document: lsp_types::VersionedTextDocumentIdentifier {
@@ -333,7 +309,7 @@ message Foo{Flob flob = 1;}
             version: 0,
         },
         content_changes: vec![TextDocumentContentChangeEvent {
-            text: "Flob flob = 1;".into(),
+            text: ", but now it duz".into(),
             range: Some(lsp_types::Range { start, end: start }),
             range_length: None,
         }],
@@ -348,7 +324,7 @@ message Foo{Flob flob = 1;}
         diags,
         PublishDiagnosticsParams {
             uri: uri.clone(),
-            diagnostics: vec![],
+            diagnostics: vec![diag(uri.clone(), "duz", "duz")],
             version: None,
         }
     );
@@ -359,12 +335,12 @@ message Foo{Flob flob = 1;}
 #[test]
 fn test_document_symbols() -> spelgud::Result<()> {
     let mut client = TestClient::new()?;
-    client.open(base_uri())?;
+    client.open(example_uri())?;
 
     let Some(DocumentSymbolResponse::Flat(actual)) =
         client.request::<DocumentSymbolRequest>(DocumentSymbolParams {
             text_document: TextDocumentIdentifier {
-                uri: base_uri().clone(),
+                uri: example_uri().clone(),
             },
             work_done_progress_params: lsp_types::WorkDoneProgressParams {
                 work_done_token: None,
@@ -383,14 +359,14 @@ fn test_document_symbols() -> spelgud::Result<()> {
 #[test]
 fn test_references() -> spelgud::Result<()> {
     let mut client = TestClient::new()?;
-    client.open(base_uri())?;
+    client.open(example_uri())?;
 
     // TODO
     return Ok(());
 
     assert_eq!(
         client.request::<lsp_types::request::References>(lsp_types::ReferenceParams {
-            text_document_position: position(base_uri(), "message Foo", 9),
+            text_document_position: position(example_uri(), "message Foo", 9),
             work_done_progress_params: lsp_types::WorkDoneProgressParams {
                 work_done_token: None,
             },
@@ -410,10 +386,10 @@ fn test_references() -> spelgud::Result<()> {
 #[test]
 fn test_complete() -> spelgud::Result<()> {
     let mut client = TestClient::new()?;
-    client.open(base_uri())?;
+    client.open(example_uri())?;
 
     let resp = client.request::<Completion>(completion_params(
-        base_uri(),
+        example_uri(),
         Position {
             line: 2,
             character: 0,
