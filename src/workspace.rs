@@ -57,4 +57,8 @@ impl Workspace {
     ) -> Result<Option<lsp_types::CompletionResponse>> {
         Ok(None)
     }
+
+    pub fn symbols(&self, uri: &Url) -> Result<Vec<lsp_types::SymbolInformation>> {
+        self.get(uri)?.symbols(uri)
+    }
 }

@@ -352,7 +352,54 @@ fn test_document_symbols() -> spelgud::Result<()> {
     else {
         panic!("Expected DocumentSymbolResponse::Flat")
     };
-    assert_elements_equal(actual, vec![], |s| s.name.clone());
+    assert_elements_equal(
+        actual,
+        vec![
+            #[allow(deprecated)]
+            SymbolInformation {
+                name: "The quick brown fox jumped over the lazy dog.".into(),
+                kind: lsp_types::SymbolKind::STRING,
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: example_uri(),
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
+                },
+                container_name: None,
+            },
+            #[allow(deprecated)]
+            SymbolInformation {
+                name: "The quik brown fox jumpd over the lazy dog.".into(),
+                kind: lsp_types::SymbolKind::STRING,
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: example_uri(),
+                    range: Range {
+                        start: Position {
+                            line: 1,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 1,
+                            character: 0,
+                        },
+                    },
+                },
+                container_name: None,
+            },
+        ],
+        |s| s.name.clone(),
+    );
     Ok(())
 }
 

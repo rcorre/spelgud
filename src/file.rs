@@ -56,6 +56,32 @@ impl File {
     pub fn text(&self) -> &str {
         self.text.as_str()
     }
+
+    pub fn symbols(&self, uri: &lsp_types::Url) -> Result<Vec<lsp_types::SymbolInformation>> {
+        #[allow(deprecated)]
+        Ok(self
+            .text()
+            .lines()
+            .enumerate()
+            .map(|(line, text)| {
+                let line = line.try_into().unwrap();
+                lsp_types::SymbolInformation {
+                    name: text.into(),
+                    kind: lsp_types::SymbolKind::STRING,
+                    tags: None,
+                    deprecated: None,
+                    location: lsp_types::Location {
+                        uri: uri.clone(),
+                        range: lsp_types::Range {
+                            start: lsp_types::Position { line, character: 0 },
+                            end: lsp_types::Position { line, character: 0 },
+                        },
+                    },
+                    container_name: None,
+                }
+            })
+            .collect())
+    }
 }
 
 fn char_to_byte(line: &str, char: u32) -> usize {
@@ -67,7 +93,62 @@ fn char_to_byte(line: &str, char: u32) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
+
+    #[test]
+    fn test_symbols() {
+        let text = "One two three\nFour five six\n";
+        let file = File::new(text.to_string()).unwrap();
+        let uri = lsp_types::Url::parse("file://example.txt").unwrap();
+        assert_eq!(
+            file.symbols(&uri).unwrap(),
+            vec![
+                #[allow(deprecated)]
+                lsp_types::SymbolInformation {
+                    name: "One two three".into(),
+                    kind: lsp_types::SymbolKind::STRING,
+                    tags: None,
+                    deprecated: None,
+                    location: lsp_types::Location {
+                        uri: uri.clone(),
+                        range: lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: 0,
+                                character: 0
+                            },
+                            end: lsp_types::Position {
+                                line: 0,
+                                character: 0
+                            }
+                        }
+                    },
+                    container_name: None,
+                },
+                lsp_types::SymbolInformation {
+                    name: "Four five six".into(),
+                    kind: lsp_types::SymbolKind::STRING,
+                    tags: None,
+                    deprecated: None,
+                    location: lsp_types::Location {
+                        uri,
+                        range: lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: 1,
+                                character: 0
+                            },
+                            end: lsp_types::Position {
+                                line: 1,
+                                character: 0
+                            }
+                        }
+                    },
+                    container_name: None,
+                }
+            ]
+        );
+    }
 
     #[test]
     fn test_edit() {

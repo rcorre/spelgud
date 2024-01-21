@@ -84,7 +84,9 @@ fn handle_document_symbols(
     workspace: &mut workspace::Workspace,
     params: DocumentSymbolParams,
 ) -> Result<Option<DocumentSymbolResponse>> {
-    Ok(Some(DocumentSymbolResponse::Flat(vec![])))
+    Ok(Some(DocumentSymbolResponse::Flat(
+        workspace.symbols(&params.text_document.uri)?,
+    )))
 }
 
 fn handle_references(
