@@ -3,13 +3,19 @@ mod spell;
 mod workspace;
 
 use lsp_types::notification::DidChangeTextDocument;
+use lsp_types::request::CodeActionRequest;
 use lsp_types::request::Completion;
+use lsp_types::CodeAction;
+use lsp_types::CodeActionKind;
+use lsp_types::CodeActionParams;
+use lsp_types::CodeActionResponse;
 use lsp_types::CompletionParams;
 use lsp_types::CompletionResponse;
 use lsp_types::DidChangeTextDocumentParams;
 use lsp_types::ReferenceParams;
 use lsp_types::SaveOptions;
 use lsp_types::TextDocumentSyncKind;
+use lsp_types::TextEdit;
 
 use lsp_server::{Connection, Message};
 use lsp_types::request::References;
@@ -105,6 +111,48 @@ fn handle_completion(
     workspace.complete(&uri, pos.line.try_into()?, pos.character.try_into()?)
 }
 
+fn handle_code_action(
+    workspace: &mut workspace::Workspace,
+    params: CodeActionParams,
+) -> Result<Option<CodeActionResponse>> {
+    eprintln!("Got action {params:?}");
+    let uri = params.text_document.uri;
+    let mut res = vec![];
+    for diag in params.context.diagnostics {
+        log::trace!("Generating actions for {diag:?}");
+        // If data is None, there are no suggestions
+        let Some(data) = diag.data else {
+            continue;
+        };
+        let data: spell::DiagnosticData = serde_json::from_value(data)?;
+        res.extend(data.fixes.iter().map(|fix| {
+            lsp_types::CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Change {} to {}", data.original, fix),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: None,
+                edit: Some(lsp_types::WorkspaceEdit {
+                    changes: Some(
+                        [(
+                            uri.clone(),
+                            vec![TextEdit {
+                                range: data.range,
+                                new_text: fix.to_owned(),
+                            }],
+                        )]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    ),
+                    ..Default::default()
+                }),
+                data: None,
+                ..Default::default()
+            })
+        }));
+    }
+    Ok(Some(res))
+}
+
 fn notify_did_open(
     workspace: &mut workspace::Workspace,
     params: DidOpenTextDocumentParams,
@@ -181,6 +229,7 @@ pub fn run(connection: Connection) -> Result<()> {
                 ..Default::default()
             },
         )),
+        code_action_provider: Some(lsp_types::CodeActionProviderCapability::Simple(true)),
         ..Default::default()
     })
     .unwrap();
@@ -211,6 +260,11 @@ pub fn run(connection: Connection) -> Result<()> {
                     Completion::METHOD => {
                         Some(handle::<Completion>(&mut workspace, req, handle_completion))
                     }
+                    CodeActionRequest::METHOD => Some(handle::<CodeActionRequest>(
+                        &mut workspace,
+                        req,
+                        handle_code_action,
+                    )),
                     _ => None,
                 };
                 if let Some(resp) = resp {

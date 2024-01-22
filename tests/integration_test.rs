@@ -3,15 +3,16 @@ use lsp_server::{Connection, Message};
 use lsp_types::notification::{
     DidChangeTextDocument, DidOpenTextDocument, DidSaveTextDocument, PublishDiagnostics,
 };
-use lsp_types::request::{Completion, DocumentSymbolRequest, Shutdown};
+use lsp_types::request::{CodeActionRequest, Completion, DocumentSymbolRequest, Shutdown};
 use lsp_types::{notification::Initialized, request::Initialize, InitializedParams};
 use lsp_types::{
-    CompletionParams, Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, InitializeParams, Location, PartialResultParams,
-    Position, PublishDiagnosticsParams, Range, SymbolInformation, SymbolKind,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, WorkDoneProgressParams,
+    CodeAction, CodeActionContext, CodeActionOrCommand, CodeActionParams, CompletionParams,
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    InitializeParams, Location, PartialResultParams, Position, PublishDiagnosticsParams, Range,
+    SymbolInformation, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, TextEdit, Url, WorkDoneProgressParams,
+    WorkspaceEdit,
 };
 use pretty_assertions::assert_eq;
 use spelgud::Result;
@@ -20,6 +21,15 @@ use std::fmt::Debug;
 
 fn example_uri() -> Url {
     Url::from_file_path(std::fs::canonicalize("./testdata/example.txt").unwrap()).unwrap()
+}
+
+fn check_diags(actual: PublishDiagnosticsParams, expected: &[Diagnostic]) {
+    let actual = actual.diagnostics;
+    assert_eq!(expected.len(), actual.len());
+    for (expected, actual) in expected.iter().zip(actual) {
+        assert_eq!(expected.range, actual.range);
+        assert_eq!(expected.message, actual.message);
+    }
 }
 
 fn diag(uri: Url, target: &str, message: &str) -> Diagnostic {
@@ -145,6 +155,10 @@ struct TestClient {
 
 impl TestClient {
     fn new() -> Result<TestClient> {
+        let _ = env_logger::builder()
+            .is_test(true)
+            .filter(None, log::LevelFilter::Trace)
+            .try_init();
         Self::new_with_root("testdata")
     }
 
@@ -264,13 +278,12 @@ fn test_open() -> spelgud::Result<()> {
 
     let diags = client.open(example_uri())?;
     assert_eq!(diags.uri, example_uri());
-    assert_elements_equal(
-        diags.diagnostics,
-        vec![
+    check_diags(
+        diags,
+        &[
             diag(example_uri(), "quik", "quik"),
             diag(example_uri(), "jumpd", "jumpd"),
         ],
-        |s| s.message.clone(),
     );
     Ok(())
 }
@@ -320,15 +333,64 @@ fn test_diagnostics_on_save() -> spelgud::Result<()> {
         text: None,
     })?;
     let diags = client.recv::<PublishDiagnostics>()?;
-    assert_eq!(
-        diags,
-        PublishDiagnosticsParams {
-            uri: uri.clone(),
-            diagnostics: vec![diag(uri.clone(), "duz", "duz")],
-            version: None,
-        }
-    );
+    assert_eq!(diags.uri, uri);
+    check_diags(diags, &[diag(uri.clone(), "duz", "duz")]);
 
+    Ok(())
+}
+
+#[test]
+fn test_actions() -> spelgud::Result<()> {
+    let mut client = TestClient::new()?;
+
+    let diags = client.open(example_uri())?;
+    assert_eq!(diags.uri, example_uri());
+    let diag = diags.diagnostics.first().unwrap();
+
+    let actions = client
+        .request::<CodeActionRequest>(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: example_uri() },
+            range: diag.range,
+            context: CodeActionContext {
+                diagnostics: vec![diag.to_owned()],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: PartialResultParams {
+                partial_result_token: None,
+            },
+        })?
+        .expect("no actions");
+
+    let mut actions = actions.iter().map(|act| match act {
+        CodeActionOrCommand::Command(_) => panic!("Unexpected command"),
+        CodeActionOrCommand::CodeAction(a) => a,
+    });
+
+    let fix = actions
+        .find(|a| a.title == "Change quik to quick")
+        .expect("Did not find fix");
+    assert_eq!(
+        fix.edit,
+        Some(WorkspaceEdit {
+            changes: Some(
+                [(
+                    example_uri(),
+                    vec![TextEdit {
+                        range: diag.range,
+                        new_text: "quick".to_string(),
+                    }]
+                )]
+                .iter()
+                .cloned()
+                .collect()
+            ),
+            ..Default::default()
+        })
+    );
     Ok(())
 }
 

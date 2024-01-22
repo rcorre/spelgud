@@ -126,6 +126,7 @@ mod tests {
                     },
                     container_name: None,
                 },
+                #[allow(deprecated)]
                 lsp_types::SymbolInformation {
                     name: "Four five six".into(),
                     kind: lsp_types::SymbolKind::STRING,

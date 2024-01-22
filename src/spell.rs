@@ -7,6 +7,14 @@ use lsp_types::{Diagnostic, Url};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+// The context placed into Diagnostic.Data
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct DiagnosticData {
+    pub original: String,
+    pub fixes: Vec<String>,
+    pub range: lsp_types::Range,
+}
+
 pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
     let mut proc = Command::new("aspell")
         .arg("--pipe")
@@ -46,10 +54,10 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
             // Suggestions: & original count offset: miss, miss, …
             // None: # original offset
             // Offset is a character offset.
-            let parts: Vec<&str> = output.split(&[' ', ':']).collect();
+            let parts: Vec<&str> = output.split(&[' ', ':', ',']).collect();
             let diag = match parts.as_slice() {
-                ["&", original, _count, offset, _misses @ ..] => lsp_types::Diagnostic {
-                    range: lsp_types::Range {
+                ["&", original, _count, offset, misses @ ..] => {
+                    let range = lsp_types::Range {
                         start: lsp_types::Position {
                             line,
                             character: offset.parse::<u32>()?,
@@ -59,11 +67,23 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
                             character: offset.parse::<u32>()?
                                 + u32::try_from(original.chars().count())?,
                         },
-                    },
-                    severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-                    message: original.to_string(),
-                    ..Default::default()
-                },
+                    };
+                    lsp_types::Diagnostic {
+                        range,
+                        severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                        message: original.to_string(),
+                        data: Some(serde_json::to_value(DiagnosticData {
+                            range,
+                            original: original.to_string(),
+                            fixes: misses
+                                .iter()
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.trim().to_string())
+                                .collect(),
+                        })?),
+                        ..Default::default()
+                    }
+                }
                 ["#", original, offset] => lsp_types::Diagnostic {
                     range: lsp_types::Range {
                         start: lsp_types::Position {
@@ -114,40 +134,43 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            actual,
-            vec![
-                Diagnostic {
-                    range: lsp_types::Range {
-                        start: lsp_types::Position {
-                            line: 2,
-                            character: 4
-                        },
-                        end: lsp_types::Position {
-                            line: 2,
-                            character: 9
-                        }
+        assert!(matches!(
+            actual[..],
+            [Diagnostic {
+                range:
+                    lsp_types::Range {
+                        start:
+                            lsp_types::Position {
+                                line: 2,
+                                character: 4,
+                            },
+                        end:
+                            lsp_types::Position {
+                                line: 2,
+                                character: 9,
+                            },
                     },
-                    severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-                    message: "kwick".into(),
-                    ..Default::default()
-                },
-                Diagnostic {
-                    range: lsp_types::Range {
-                        start: lsp_types::Position {
-                            line: 2,
-                            character: 36
-                        },
-                        end: lsp_types::Position {
-                            line: 2,
-                            character: 41
-                        }
+                severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                message: ref msg1,
+                ..
+            }, Diagnostic {
+                range:
+                    lsp_types::Range {
+                        start:
+                            lsp_types::Position {
+                                line: 2,
+                                character: 36,
+                            },
+                        end:
+                            lsp_types::Position {
+                                line: 2,
+                                character: 41,
+                            },
                     },
-                    severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-                    message: "lazzy".into(),
-                    ..Default::default()
-                }
-            ]
-        );
+                severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                message: ref msg2,
+                ..
+            }] if msg1 == "kwick" && msg2 == "lazzy"
+        ));
     }
 }
