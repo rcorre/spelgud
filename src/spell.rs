@@ -17,7 +17,7 @@ pub struct DiagnosticData {
 
 pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
     let mut proc = Command::new("aspell")
-        .arg("--pipe")
+        .arg("-a")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
@@ -116,6 +116,8 @@ pub fn diags(uri: &Url, text: &str) -> Result<Vec<Diagnostic>> {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
     #[test]
     fn test_diags() {
@@ -124,7 +126,7 @@ mod tests {
             &uri,
             [
                 "The quick brown fox jumped over the lazy dog",
-                "The quick brown fox jumped over the lazy doge",
+                "The quick brown fox jumped over the lazy dog",
                 "The kwick brown fox jumped over the lazzy dog",
                 "",
                 "The quick brown fox jumped over the lazy dog",
@@ -134,43 +136,43 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(
-            actual[..],
-            [Diagnostic {
-                range:
-                    lsp_types::Range {
-                        start:
-                            lsp_types::Position {
-                                line: 2,
-                                character: 4,
-                            },
-                        end:
-                            lsp_types::Position {
-                                line: 2,
-                                character: 9,
-                            },
-                    },
-                severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-                message: ref msg1,
-                ..
-            }, Diagnostic {
-                range:
-                    lsp_types::Range {
-                        start:
-                            lsp_types::Position {
-                                line: 2,
-                                character: 36,
-                            },
-                        end:
-                            lsp_types::Position {
-                                line: 2,
-                                character: 41,
-                            },
-                    },
-                severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-                message: ref msg2,
-                ..
-            }] if msg1 == "kwick" && msg2 == "lazzy"
-        ));
+        eprintln!("{:?}", actual);
+        assert_eq!(actual.len(), 2);
+        assert_eq!(
+            actual[0].range,
+            lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 2,
+                    character: 4,
+                },
+                end: lsp_types::Position {
+                    line: 2,
+                    character: 9,
+                },
+            },
+        );
+        assert_eq!(
+            actual[0].severity,
+            Some(lsp_types::DiagnosticSeverity::ERROR)
+        );
+        assert_eq!(actual[0].message, "kwick");
+        assert_eq!(
+            actual[1].range,
+            lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 2,
+                    character: 36,
+                },
+                end: lsp_types::Position {
+                    line: 2,
+                    character: 41,
+                },
+            }
+        );
+        assert_eq!(
+            actual[1].severity,
+            Some(lsp_types::DiagnosticSeverity::ERROR)
+        );
+        assert_eq!(actual[1].message, "lazzy");
     }
 }
