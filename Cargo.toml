@@ -10,6 +10,7 @@ lsp-types = "0.94.1"
 lsp-server = "0.7.4"
 log = "0.4.20"
 env_logger = { version = "0.10.1", default-features = false }
+which = "6.0.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"

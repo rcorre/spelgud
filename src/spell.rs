@@ -17,6 +17,8 @@ pub struct DiagnosticData {
 
 pub struct Process(std::process::Child);
 
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "lowercase")]
 pub enum Program {
     Aspell,
     Ispell,
@@ -24,25 +26,35 @@ pub enum Program {
 }
 
 impl Program {
-    fn command(&self) -> &str {
+    fn command(&self) -> Option<std::path::PathBuf> {
         match self {
-            Program::Aspell => "aspell",
-            Program::Ispell => "ispell",
-            Program::Hunspell => "hunspell",
+            Program::Aspell => which::which("aspell"),
+            Program::Ispell => which::which("ispell"),
+            Program::Hunspell => which::which("hunspell"),
         }
+        .ok()
+    }
+
+    fn pick(choices: &[Program]) -> Result<std::path::PathBuf> {
+        Ok(choices
+            .iter()
+            .find_map(|c| c.command())
+            .ok_or("No spell checker found")?)
     }
 }
 
 impl Process {
-    pub fn new(prog: Program) -> Result<Process> {
-        let cmd = prog.command();
-        let mut proc = Command::new(cmd)
+    // Launches the first executable spell checker in the list.
+    pub fn new(programs: &[Program]) -> Result<Process> {
+        let cmd = Program::pick(programs)?;
+
+        let mut proc = Command::new(cmd.as_path())
             .arg("-a")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;
 
-        log::info!("Started {cmd} with pid {}", proc.id());
+        log::info!("Started {cmd:?} with pid {}", proc.id());
 
         let stdin = proc.stdin.as_mut().unwrap();
         let mut stdout = std::io::BufReader::new(proc.stdout.as_mut().unwrap());
@@ -164,8 +176,8 @@ mod tests {
     }
 
     fn test_diags_impl(prog: Program) {
-        eprintln!("test_diags_impl({})", prog.command());
-        let mut proc = Process::new(prog).unwrap();
+        eprintln!("test_diags_impl({:?})", prog.command());
+        let mut proc = Process::new(&[prog]).unwrap();
         let actual = proc
             .diags(
                 [

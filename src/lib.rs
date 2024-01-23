@@ -33,6 +33,11 @@ use std::error::Error;
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+#[derive(serde::Deserialize, Debug)]
+struct Config {
+    programs: Vec<spell::Program>,
+}
+
 // Handle a request, returning the response to send.
 fn handle<Req>(
     workspace: &mut workspace::Workspace,
@@ -112,7 +117,7 @@ fn handle_completion(
 }
 
 fn handle_code_action(
-    workspace: &mut workspace::Workspace,
+    _workspace: &mut workspace::Workspace,
     params: CodeActionParams,
 ) -> Result<Option<CodeActionResponse>> {
     eprintln!("Got action {params:?}");
@@ -236,9 +241,19 @@ pub fn run(connection: Connection) -> Result<()> {
 
     log::info!("Initializing");
     let init_params = connection.initialize(server_capabilities)?;
-    let _params: InitializeParams = serde_json::from_value(init_params).unwrap();
+    let params: InitializeParams = serde_json::from_value(init_params)?;
+    let conf: Config = match params.initialization_options {
+        Some(opts) => serde_json::from_value(opts)?,
+        None => Config {
+            programs: vec![
+                spell::Program::Aspell,
+                spell::Program::Ispell,
+                spell::Program::Hunspell,
+            ],
+        },
+    };
 
-    let mut workspace = workspace::Workspace::new()?;
+    let mut workspace = workspace::Workspace::new(conf.programs.as_slice())?;
 
     for msg in &connection.receiver {
         log::info!("Handling message {msg:?}");

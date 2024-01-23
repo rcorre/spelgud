@@ -13,10 +13,10 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new() -> Result<Workspace> {
+    pub fn new(programs: &[spell::Program]) -> Result<Workspace> {
         Ok(Workspace {
             files: hash_map::HashMap::new(),
-            proc: spell::Process::new(spell::Program::Aspell)?,
+            proc: spell::Process::new(programs)?,
         })
     }
 
