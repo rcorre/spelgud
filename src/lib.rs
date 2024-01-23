@@ -238,7 +238,7 @@ pub fn run(connection: Connection) -> Result<()> {
     let init_params = connection.initialize(server_capabilities)?;
     let _params: InitializeParams = serde_json::from_value(init_params).unwrap();
 
-    let mut workspace = workspace::Workspace::new();
+    let mut workspace = workspace::Workspace::new()?;
 
     for msg in &connection.receiver {
         log::info!("Handling message {msg:?}");
