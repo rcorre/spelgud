@@ -158,7 +158,14 @@ mod tests {
 
     #[test]
     fn test_diags() {
-        let mut proc = Process::new(Program::Aspell).unwrap();
+        test_diags_impl(Program::Aspell);
+        test_diags_impl(Program::Ispell);
+        test_diags_impl(Program::Hunspell);
+    }
+
+    fn test_diags_impl(prog: Program) {
+        eprintln!("test_diags_impl({})", prog.command());
+        let mut proc = Process::new(prog).unwrap();
         let actual = proc
             .diags(
                 [
